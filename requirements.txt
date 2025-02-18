@@ -1,6 +1,5 @@
 streamlit
 bcrypt
-os
 firebase-admin
 python-dotenv
 reportlab
