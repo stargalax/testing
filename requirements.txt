@@ -1,9 +1,8 @@
 streamlit
+bcrypt
+json
+os
 firebase-admin
 python-dotenv
-pandas
 reportlab
-numpy==1.23.5
-bcrypt
-os
-json
+watchdog  
