@@ -1,14 +1,12 @@
 import streamlit as st
 import bcrypt
-import json
+import psycopg2
 import os
-from doctor_dashboard  import doctor_dashboard
+from doctor_dashboard import doctor_dashboard
 from nurse_dashboard import nurse_functions
 
-# For simplicity, store user data in a dictionary (you could also use a database)
-USER_DATA = {}
-USER_ROLES = {}  # Dictionary to store user roles (doctor, nurse, etc.)
-DOCTOR_EMAIL = "doctor@example.com"  # Hardcoded doctor email (can be changed)
+# PostgreSQL connection details (replace with your actual connection info)
+DATABASE_URL = os.getenv("DATABASE_URL")  # Set this environment variable in Render
 
 # Helper function to hash passwords
 def hash_password(password):
@@ -18,22 +16,45 @@ def hash_password(password):
 def verify_password(stored_hash, password):
     return bcrypt.checkpw(password.encode('utf-8'), stored_hash)
 
-# Check if we need to load existing user data
-if os.path.exists("users.json"):
-    with open("users.json", "r") as f:
-        USER_DATA = json.load(f)
+# Function to connect to PostgreSQL
+def connect_db():
+    conn = psycopg2.connect(DATABASE_URL)  # Database URL from Render environment variables
+    return conn
 
-# Function to save user data to a file
-def save_user_data():
-    with open("users.json", "w") as f:
-        json.dump(USER_DATA, f)
+# Function to check if the email exists and verify password
+def authenticate_user(email, password):
+    conn = connect_db()
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT password_hash, role FROM users WHERE email = %s", (email,))
+    user = cursor.fetchone()
+    
+    conn.close()
+    
+    if user and verify_password(user[0], password):
+        return user[1]  # Return the role
+    return None
 
-# Function to save user roles to a file
-def save_user_roles():
-    with open("user_roles.json", "w") as f:
-        json.dump(USER_ROLES, f)
+# Function to create a new user
+def create_user(email, password, role):
+    conn = connect_db()
+    cursor = conn.cursor()
+    
+    # Check if email already exists
+    cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
+    if cursor.fetchone():
+        conn.close()
+        return "Email already exists."
+    
+    # Hash password and insert the new user into the database
+    password_hash = hash_password(password).decode('utf-8')
+    cursor.execute("INSERT INTO users (email, password_hash, role) VALUES (%s, %s, %s)", (email, password_hash, role))
+    conn.commit()
+    conn.close()
+    
+    return "Account created successfully!"
 
-# Create the Streamlit form for Sign-Up and Login
+# Streamlit app logic
 def main():
     st.title("Authentication System")
 
@@ -65,23 +86,12 @@ def main():
         confirm_password = st.text_input("Confirm Password", type="password")
 
         if st.button("Sign Up"):
-            if email in USER_DATA:
-                st.error("Email already exists. Please choose a different one.")
-            elif password != confirm_password:
+            if password != confirm_password:
                 st.error("Passwords do not match.")
             else:
-                hashed_password = hash_password(password)
-                USER_DATA[email] = hashed_password.decode('utf-8')
-                
-                # Assign role based on the email
-                if email == DOCTOR_EMAIL:
-                    USER_ROLES[email] = "doctor"
-                else:
-                    USER_ROLES[email] = "nurse"
-                
-                save_user_data()
-                save_user_roles()
-                st.success("Account created successfully! You can now log in.")
+                role = "doctor" if email == "doctor@example.com" else "nurse"
+                result = create_user(email, password, role)
+                st.success(result)
 
     elif choice == "Login":
         st.subheader("Login to Your Account")
@@ -91,33 +101,21 @@ def main():
         password = st.text_input("Password", type="password")
 
         if st.button("Login"):
-            if email in USER_DATA:
-                stored_password_hash = USER_DATA[email].encode('utf-8')
-                if verify_password(stored_password_hash, password):
-                    st.session_state["email"] = email
-                    st.session_state["role"] = USER_ROLES.get(email, "nurse")  # Default to nurse if no role is found
-                    st.success(f"Logged in as {email}")
-                    
-                    # Perform role-based redirection by simulating page load change
-                    if email == DOCTOR_EMAIL:
-                        st.session_state["role"] = "doctor"
-                        st.rerun()  # Forces the page to reload and show doctor's dashboard
-                    else:
-                        st.session_state["role"] = "nurse"
-                        st.rerun()  # Forces the page to reload and show nurse's dashboard
-                else:
-                    st.error("Incorrect password.")
+            role = authenticate_user(email, password)
+            if role:
+                st.session_state["email"] = email
+                st.session_state["role"] = role
+                st.success(f"Logged in as {email}")
+                st.rerun()  # Forces the page to reload and show the appropriate dashboard
             else:
-                st.error("Email not found. Please sign up first.")
+                st.error("Incorrect email or password.")
 
 # Function for doctor's landing page
 def doctor_landing_page():
-    from doctor_dashboard  import doctor_dashboard
     doctor_dashboard()
 
 # Function for nurse's landing page
 def nurse_landing_page():
-    from nurse_dashboard import nurse_functions
     nurse_functions()
 
 if __name__ == '__main__':
